@@ -43,6 +43,7 @@
 #                       if none is provided using "-s".
 # 20150707 S.Deziel     Fix agent daemon regex to match for newer ruby versions. Fix lastrunfile
 #                       query to work with recent versions of puppet.
+# 20170922 J.Grammenos  Fix Typo. Add parameter to allow for disabling warn and crit if puppet is not being run via cron.
 
 # Explicitly set the PATH to that of ENV_SUPATH in /etc/login.defs and unset
 # various other variables. For details, see:
@@ -56,6 +57,7 @@ export BASH_XTRACEFD=
 
 # SETTINGS
 AGENT_DAEMON=false
+PUPPET_CRON=false
 CRIT=7200
 WARN=3600
 statefile=""
@@ -72,6 +74,8 @@ result () {
     4) echo "CRITICAL: Puppet daemon not running|${perf_data}";rc=2 ;;
     5) echo "UNKNOWN: no WARN or CRIT parameters were sent to this check|${perf_data}";rc=3 ;;
     6) echo "CRITICAL: Last run had 1 or more errors. Check the logs|${perf_data}";rc=2 ;;
+    7) echo "WARNING: Last run was ${time_since_last} seconds ago. warn is ${WARN}|${perf_data}";rc=0 ;;
+    8) echo "CRITICAL: Last run was ${time_since_last} seconds ago. crit is ${CRIT}|${perf_data}";rc=0 ;;
   esac
   exit $rc
 }
@@ -81,9 +85,10 @@ usage () {
   echo "USAGE: "
   echo "  $0 [-w 3600] [-c 7200] [-s statefile]"
   echo "    -w warning threshold (default 3600 seconds)"
-  echo "    -c ciritcal threshold (default 7200 seconds)"
+  echo "    -c critical threshold (default 7200 seconds)"
   echo "    -s statefile (default: /var/lib/puppet/state/last_run_summary.yaml)"
   echo "    -p output performance data"
+  echo "    -r disable crit and warn for last run time"
   echo ""
   exit 1
 }
@@ -95,7 +100,7 @@ yaml_parser () {
   sed -n "/^  $section/,/^  [^ ]/ s/^    $field: \(.*\)$/\1/p" ${statefile}
 }
 
-while getopts "ac:s:w:p" opt
+while getopts "ac:s:w:p:r" opt
 do
   case $opt in
     a) AGENT_DAEMON=true ;;
@@ -117,6 +122,7 @@ do
         usage
       fi
     ;;
+    p) PUPPET_CRON=true ;;
     *)
       usage
     ;;
@@ -175,8 +181,13 @@ fi
 if [ "${uptime}" -gt "${CRIT}" -o "${uptime}" -eq 0 ]; then
   now="$(date +%s)"
   time_since_last="$((now-last_run))"
-  [ "${time_since_last}" -ge "${CRIT}" ] && result 3
-  [ "${time_since_last}" -ge "${WARN}" ] && result 2
+  if [ "$PUPPET_CRON" = "true" ]; then
+    [ "${time_since_last}" -ge "${CRIT}" ] && result 3
+    [ "${time_since_last}" -ge "${WARN}" ] && result 2
+  else
+    [ "${time_since_last}" -ge "${CRIT}" ] && result 8
+    [ "${time_since_last}" -ge "${WARN}" ] && result 7
+  fi
 fi
 
 # if we come here it works!
